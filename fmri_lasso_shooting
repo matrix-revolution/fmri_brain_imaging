@@ -1,0 +1,150 @@
+trX1 = load('fmri/data/Xtrain.txt');
+trY1 = load('fmri/data/Ytrain.txt');
+tstX1 = load('fmri/data/Xtest.txt');
+tstY1 = load('fmri/data/Ytest.txt');
+
+trX = zscore(trX1);
+trY = zscore(trY1);
+tstX = zscore(tstX1);
+tstY = zscore(tstY1);
+
+
+[N,d]= size(trX);
+N=N- N/5;
+k=10;
+training_RMSE(1:k) = 0;
+validation_RMSE(1:k) = 0;
+total_non_zero(1:k) = 0;
+lambda_values(1:k) = 0;
+weight_values(1:k , 1:d) = 0;
+bias_values(1:k) = 0;
+cross_validation_RMSE(1:1) = 0;
+cross_validation_training_RMSE(1:1) = 0;
+
+%lambda= 2*max(abs(trX'*(trY-mean(trY))));
+lambda= 100;
+
+a_temp= trX.*trX;
+a= 2*sum(a_temp,1);
+
+w_old(d,1) = 0;
+w_new(d,1) = 0;
+b_old = 0;
+b_new = 0;
+
+for repeat=1:k
+    for cross_val_count=0:0
+        start_index= cross_val_count*60+1;
+        end_index= start_index+60-1;
+        if cross_val_count==0
+            trngX= trX(end_index+1:N,:);
+            trngY= trY(end_index+1:N,:);
+            valX = trX(start_index:end_index,:);
+            valY = trY(start_index:end_index,:);
+        elseif cross_val_count==4
+            trngX= trX(1:start_index-1,:);
+            trngY= trY(1:start_index-1,:);
+            valX = trX(start_index:end_index,:);
+            valY = trY(start_index:end_index,:);
+        else
+            trngX_first = trX(1:start_index-1,:);
+            trngX_second = trX(end_index+1:N,:);
+            trngY_first = trY(1:start_index-1,:);
+            trngY_second = trY(end_index+1:N,:);
+            trngX= vertcat(trngX_first,trngX_second);
+            trngY= vertcat(trngY_first,trngY_second);
+            valX = trX(start_index:end_index,:);
+            valY = trY(start_index:end_index,:);
+        end
+        
+        count=0;
+        not_converged=1;
+        trRMSE_old=0;
+        valRMSE_old=0;
+        while not_converged
+            count=count+1;
+            r_old= trngY - (trngX*w_old +b_old);
+            b_new= 1/N*(sum(r_old))+b_old;
+            r_new= r_old+ b_old- b_new;
+            for k = 1:d
+                c_k = 2*trngX(:,k)'*(r_new + trngX(:,k)*w_old(k));
+                if c_k < -lambda
+                    w_new(k) = (c_k+lambda)/a(k);
+                elseif c_k > lambda
+                    w_new(k) = (c_k-lambda)/a(k);
+                else
+                    w_new(k) = 0; 
+                end
+                r_new= r_new + trngX(:,k)*(w_old(k) - w_new(k));
+            end
+            w_old = w_new;
+            b_old = b_new;
+
+            sum_squared_trR_new = r_new.^2;
+            trRMSE_new = sqrt(mean(sum_squared_trR_new));
+
+            val_r = valY - (valX*w_old + b_old);
+            sum_squared_val = val_r.^2;
+            valRMSE_new = sqrt(mean(sum_squared_val));
+
+            if valRMSE_old ~=0 && (valRMSE_new > valRMSE_old || abs(valRMSE_new-valRMSE_old)< 0.005)
+                not_converged = 0;
+            end
+            valRMSE_old = valRMSE_new;
+            
+        end
+        %disp(count)
+        cross_validation_RMSE(cross_val_count+1) = valRMSE_new;
+        cross_validation_training_RMSE(cross_val_count+1)= trRMSE_new;
+    end
+
+    
+    
+    lambda_values(repeat) = lambda;
+    disp(lambda_values)
+    total_non_zero(repeat) = nnz(w_old);
+    training_RMSE(repeat) = mean(cross_validation_training_RMSE);
+    disp(training_RMSE)
+    validation_RMSE(repeat) = mean(cross_validation_RMSE);
+    disp(validation_RMSE)
+    weight_values(repeat, :) = w_old';
+    bias_values(repeat) = b_old;    
+    %lambda=lambda/2;
+    lambda=lambda/3;
+    disp('------------------------------------------------')
+    
+end
+
+x1 = lambda_values;
+y1 = training_RMSE;
+figure % new figure window
+plot(x1,y1)
+
+hold on
+
+y2 = validation_RMSE;
+plot(x1,y2)
+xlabel('lambda values')
+ylabel('training rmse and validation rmse')
+
+hold off % reset hold state
+
+figure
+y3 = total_non_zero;
+plot(x1, y3)
+xlabel('lambda values')
+ylabel('sparsity')
+
+
+[sortedVal, valIdx] = sort(validation_RMSE);
+min_weight = weight_values(valIdx(1), :);
+min_weight = min_weight';
+min_bias = bias_values(valIdx(1));
+%disp(min_weight)
+%disp(min_bias)
+
+test_r = tstY - (tstX*min_weight + min_bias);
+sum_squared_test = test_r.^2;
+testRMSE = sqrt(mean(sum_squared_test));
+disp(testRMSE)
+
